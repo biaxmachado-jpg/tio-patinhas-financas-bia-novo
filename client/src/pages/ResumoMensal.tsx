@@ -2,6 +2,7 @@ import { Fragment, useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { formatBRL } from "@/lib/currency";
 import { Card } from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { BarChart3, ChevronDown, ChevronRight, TrendingDown, TrendingUp } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -46,6 +47,7 @@ export default function ResumoMensal() {
 
   const [expandedTotals, setExpandedTotals] = useState<Set<string>>(new Set());
   const [expandedMonthly, setExpandedMonthly] = useState<Set<string>>(new Set());
+  const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
 
   const isLoading =
     transactionsQuery.isLoading ||
@@ -54,22 +56,24 @@ export default function ResumoMensal() {
     accountsQuery.isLoading ||
     cardsQuery.isLoading;
 
-  const { months, incomeRows, expenseRows } = useMemo(() => {
-    const categories = categoriesQuery.data ?? [];
+  // Junta conta bancária + cartão numa lista só, com o histórico completo
+  // (sem filtro de ano ainda) — usada tanto pra listar os anos disponíveis
+  // no seletor quanto, filtrada por selectedYear logo abaixo, pra montar as
+  // tabelas.
+  const { unified, availableYears } = useMemo(() => {
     const accounts = accountsQuery.data ?? [];
     const cards = cardsQuery.data ?? [];
-    const categoryById = new Map<number, any>(categories.map((c: any) => [c.id, c]));
     const accountById = new Map<number, any>(accounts.map((a: any) => [a.id, a]));
     const cardById = new Map<number, any>(cards.map((c: any) => [c.id, c]));
 
-    const unified: UnifiedTransaction[] = [];
+    const list: UnifiedTransaction[] = [];
 
     // Contas bancárias: type já vem certo do banco (income/expense), valor
     // sempre positivo na coluna amount.
     for (const t of transactionsQuery.data ?? []) {
       const amount = Math.abs(parseFloat(String((t as any).amount ?? 0)));
       if (!amount) continue;
-      unified.push({
+      list.push({
         id: `bank-${(t as any).id}`,
         date: new Date((t as any).date),
         description: (t as any).description ?? "",
@@ -88,7 +92,7 @@ export default function ResumoMensal() {
       const raw = parseFloat(String((t as any).amount ?? 0));
       const amount = Math.abs(raw);
       if (!amount) continue;
-      unified.push({
+      list.push({
         id: `card-${(t as any).id}`,
         date: new Date((t as any).date),
         description: (t as any).description ?? "",
@@ -100,30 +104,29 @@ export default function ResumoMensal() {
       });
     }
 
-    if (unified.length === 0) {
-      return { months: [] as string[], incomeRows: [] as CategoryRow[], expenseRows: [] as CategoryRow[] };
-    }
+    const years = new Set<number>([new Date().getFullYear()]);
+    for (const t of list) years.add(t.date.getFullYear());
 
-    // Todos os meses desde o início dos dados até o mês mais recente, sem
-    // buraco — mesmo um mês sem nenhuma transação aparece como coluna
-    // zerada, pra dar continuidade real à evolução.
-    let minDate = unified[0].date;
-    let maxDate = unified[0].date;
-    for (const t of unified) {
-      if (t.date < minDate) minDate = t.date;
-      if (t.date > maxDate) maxDate = t.date;
-    }
+    return { unified: list, availableYears: Array.from(years).sort((a, b) => b - a) };
+  }, [transactionsQuery.data, cardTransactionsQuery.data, accountsQuery.data, cardsQuery.data]);
+
+  const { months, incomeRows, expenseRows } = useMemo(() => {
+    const categories = categoriesQuery.data ?? [];
+    const categoryById = new Map<number, any>(categories.map((c: any) => [c.id, c]));
+
+    const yearTx = unified.filter((t) => t.date.getFullYear() === selectedYear);
+
+    // Os 12 meses do ano selecionado, sempre — mesmo os sem nenhuma
+    // transação aparecem como coluna zerada, pra dar continuidade real à
+    // evolução dentro do ano.
     const months: string[] = [];
-    const cursor = new Date(minDate.getFullYear(), minDate.getMonth(), 1);
-    const end = new Date(maxDate.getFullYear(), maxDate.getMonth(), 1);
-    while (cursor <= end) {
-      months.push(monthKey(cursor));
-      cursor.setMonth(cursor.getMonth() + 1);
+    for (let m = 0; m < 12; m++) {
+      months.push(monthKey(new Date(selectedYear, m, 1)));
     }
 
     const buildRows = (type: TxType): CategoryRow[] => {
       const byCategory = new Map<string, CategoryRow>();
-      for (const t of unified) {
+      for (const t of yearTx) {
         if (t.type !== type) continue;
         const key = t.categoryId != null ? String(t.categoryId) : "none";
         let row = byCategory.get(key);
@@ -150,7 +153,7 @@ export default function ResumoMensal() {
     };
 
     return { months, incomeRows: buildRows("income"), expenseRows: buildRows("expense") };
-  }, [transactionsQuery.data, cardTransactionsQuery.data, categoriesQuery.data, accountsQuery.data, cardsQuery.data]);
+  }, [unified, selectedYear, categoriesQuery.data]);
 
   const toggle = (set: Set<string>, setter: (s: Set<string>) => void, key: string) => {
     const next = new Set(set);
@@ -162,20 +165,34 @@ export default function ResumoMensal() {
   return (
     <div className="min-h-screen bg-background p-4">
       <div className="max-w-6xl mx-auto space-y-8">
-        <div>
-          <h1 className="text-3xl font-bold flex items-center gap-2">
-            <BarChart3 className="h-7 w-7 text-primary" />
-            Resumo Mensal
-          </h1>
-          <p className="text-muted-foreground mt-1">
-            Todas as receitas e despesas — contas bancárias e cartões de crédito juntos — classificadas por
-            categoria, com a evolução mês a mês desde o início dos seus dados.
-          </p>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-bold flex items-center gap-2">
+              <BarChart3 className="h-7 w-7 text-primary" />
+              Resumo Mensal
+            </h1>
+            <p className="text-muted-foreground mt-1">
+              Todas as receitas e despesas — contas bancárias e cartões de crédito juntos — classificadas por
+              categoria, com a evolução mês a mês do ano selecionado.
+            </p>
+          </div>
+          <Select value={String(selectedYear)} onValueChange={(v) => setSelectedYear(parseInt(v, 10))}>
+            <SelectTrigger className="w-32">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {availableYears.map((y) => (
+                <SelectItem key={y} value={String(y)}>
+                  {y}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
         {isLoading ? (
           <Card className="p-8 text-center text-muted-foreground">Carregando...</Card>
-        ) : months.length === 0 ? (
+        ) : unified.length === 0 ? (
           <Card className="p-8 text-center text-muted-foreground">
             Ainda não há transações suficientes pra montar o resumo. Importe algumas faturas ou extratos primeiro.
           </Card>
@@ -242,7 +259,9 @@ function TypeSection({
       </h2>
 
       {rows.length === 0 ? (
-        <Card className="p-6 text-center text-sm text-muted-foreground">Nenhuma transação de {title.toLowerCase()} encontrada.</Card>
+        <Card className="p-6 text-center text-sm text-muted-foreground">
+          Nenhuma transação de {title.toLowerCase()} encontrada neste ano.
+        </Card>
       ) : (
         <>
           <div>
