@@ -1285,6 +1285,17 @@ export async function importFile(userId: number, data: {
             continue;
           }
 
+          // Uma fatura só lista o que já aconteceu (mais a tabela de
+          // parcelas futuras, que o prompt já instrui ignorar). Se ainda
+          // assim aparecer uma transação com data no futuro, é sinal de
+          // erro de extração (ano inferido errado, ou uma linha da tabela
+          // de projeção que escapou) — não importa, avisa em vez de deixar
+          // passar um dado que não pode estar certo.
+          if (txDate.getTime() > Date.now()) {
+            errors.push(`${tx.description}: data no futuro (${tx.date}), ignorada — provável erro de extração`);
+            continue;
+          }
+
           // Calcular dueDate
           let dueDate: Date;
           if (data.dueDate) {
@@ -1519,6 +1530,16 @@ export async function importFile(userId: number, data: {
 
           const txDate = new Date(tx.date);
           if (isNaN(txDate.getTime())) { bankErrors.push(`${tx.description}: data inválida`); continue; }
+
+          // Um extrato só lista o que já aconteceu (mais a seção de
+          // "lançamentos futuros"/agendados, que o prompt já instrui
+          // ignorar). Se ainda assim aparecer uma transação com data no
+          // futuro, é sinal de erro de extração — não importa, avisa em vez
+          // de deixar passar um dado que não pode estar certo.
+          if (txDate.getTime() > Date.now()) {
+            bankErrors.push(`${tx.description}: data no futuro (${tx.date}), ignorada — provável erro de extração`);
+            continue;
+          }
 
           const toMySQLDate = (d: Date) => d.toISOString().slice(0, 19).replace('T', ' ');
 

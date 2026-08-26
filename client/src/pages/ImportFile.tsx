@@ -437,6 +437,16 @@ export default function ImportFile() {
 
       if (result.success) {
         toast.success(`${result.transactionsImported} transações importadas com sucesso!`);
+        // Algumas transações podem ter sido puladas (data inválida, valor
+        // inválido, ou — a mais comum — data no futuro, sinal de erro de
+        // extração). Sem isso, a pessoa nunca fica sabendo que algo foi
+        // ignorado silenciosamente.
+        if (result.errors && result.errors.length > 0) {
+          toast.warning(
+            `${result.errors.length} transação(ões) foram ignoradas: ${result.errors.join("; ")}`,
+            { duration: 10000 }
+          );
+        }
         setTimeout(() => {
           navigate(importType === "creditCard" ? `/cartoes/${entityId}` : `/contas/${entityId}`);
         }, 1000);
