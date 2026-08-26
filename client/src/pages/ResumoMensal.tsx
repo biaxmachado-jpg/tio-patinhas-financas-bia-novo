@@ -11,7 +11,16 @@ type TxType = "income" | "expense";
 
 interface UnifiedTransaction {
   id: string;
-  date: Date;
+  date: Date; // data real da transação (compra/lançamento) — mostrada no drill-down
+  // Mês em que a transação conta pra evolução mensal. Conta bancária: a
+  // própria data do lançamento. Cartão: a data de VENCIMENTO da fatura em
+  // que ela foi cobrada — uma compra parcelada em 21x já entra no banco
+  // como uma linha por fatura (uma por mês, com o valor daquela parcela),
+  // então agrupar pela data de vencimento é o que espalha corretamente
+  // cada parcela no mês em que ela realmente pesou no bolso, em vez de
+  // jogar o valor todo no mês da compra original. É o mesmo critério que
+  // CreditCardDetail.tsx já usa (ver db.getCreditCardTransactionsByMonth).
+  groupDate: Date;
   description: string;
   amount: number; // sempre positivo aqui — o sinal já virou "type"
   type: TxType;
@@ -73,9 +82,11 @@ export default function ResumoMensal() {
     for (const t of transactionsQuery.data ?? []) {
       const amount = Math.abs(parseFloat(String((t as any).amount ?? 0)));
       if (!amount) continue;
+      const date = new Date((t as any).date);
       list.push({
         id: `bank-${(t as any).id}`,
-        date: new Date((t as any).date),
+        date,
+        groupDate: date,
         description: (t as any).description ?? "",
         amount,
         type: (t as any).type,
@@ -92,9 +103,12 @@ export default function ResumoMensal() {
       const raw = parseFloat(String((t as any).amount ?? 0));
       const amount = Math.abs(raw);
       if (!amount) continue;
+      const date = new Date((t as any).date);
+      const dueDateRaw = (t as any).dueDate;
       list.push({
         id: `card-${(t as any).id}`,
-        date: new Date((t as any).date),
+        date,
+        groupDate: dueDateRaw ? new Date(dueDateRaw) : date,
         description: (t as any).description ?? "",
         amount,
         type: raw < 0 ? "income" : "expense",
@@ -105,7 +119,7 @@ export default function ResumoMensal() {
     }
 
     const years = new Set<number>([new Date().getFullYear()]);
-    for (const t of list) years.add(t.date.getFullYear());
+    for (const t of list) years.add(t.groupDate.getFullYear());
 
     return { unified: list, availableYears: Array.from(years).sort((a, b) => b - a) };
   }, [transactionsQuery.data, cardTransactionsQuery.data, accountsQuery.data, cardsQuery.data]);
@@ -114,7 +128,7 @@ export default function ResumoMensal() {
     const categories = categoriesQuery.data ?? [];
     const categoryById = new Map<number, any>(categories.map((c: any) => [c.id, c]));
 
-    const yearTx = unified.filter((t) => t.date.getFullYear() === selectedYear);
+    const yearTx = unified.filter((t) => t.groupDate.getFullYear() === selectedYear);
 
     // Os 12 meses do ano selecionado, sempre — mesmo os sem nenhuma
     // transação aparecem como coluna zerada, pra dar continuidade real à
@@ -141,14 +155,14 @@ export default function ResumoMensal() {
           };
           byCategory.set(key, row);
         }
-        const mKey = monthKey(t.date);
+        const mKey = monthKey(t.groupDate);
         row.monthly[mKey] = (row.monthly[mKey] ?? 0) + t.amount;
         row.total += t.amount;
         row.transactions.push(t);
       }
       const rows = Array.from(byCategory.values());
       rows.sort((a, b) => b.total - a.total);
-      for (const r of rows) r.transactions.sort((a, b) => b.date.getTime() - a.date.getTime());
+      for (const r of rows) r.transactions.sort((a, b) => b.groupDate.getTime() - a.groupDate.getTime());
       return rows;
     };
 
