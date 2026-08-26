@@ -19,6 +19,7 @@ import Profile from "./pages/Profile";
 import Database from "./pages/Database";
 import Expenses from "./pages/Expenses";
 import Income from "./pages/Income";
+import ResumoMensal from "./pages/ResumoMensal";
 
 function Router() {
   return (
@@ -56,6 +57,11 @@ function Router() {
       <Route path="/orcamentos">
         <DashboardLayout>
           <Budgets />
+        </DashboardLayout>
+      </Route>
+      <Route path="/resumo-mensal">
+        <DashboardLayout>
+          <ResumoMensal />
         </DashboardLayout>
       </Route>
       <Route path="/cartoes">
